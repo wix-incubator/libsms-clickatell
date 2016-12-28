@@ -23,8 +23,6 @@ class ClickatellSmsGateway(requestFactory: HttpRequestFactory,
   private val requestParser = new MessageRequestParser
   private val responseParser = new MessageResponseParser
 
-  override def getId: String = ClickatellSmsGateway.id
-
   override def sendPlain(sender: Sender, destPhone: String, text: String): Try[String] = {
     Try {
       val request = ClickatellHelper.createMessageRequest(
@@ -64,6 +62,10 @@ class ClickatellSmsGateway(requestFactory: HttpRequestFactory,
     }
   }
 
+  override def sendUnicode(sender: Sender, destPhone: String, text: String): Try[String] = {
+    ???
+  }
+
   private def extractAndCloseResponse(httpResponse: HttpResponse): String = {
     try {
       httpResponse.parseAsString()
@@ -71,8 +73,4 @@ class ClickatellSmsGateway(requestFactory: HttpRequestFactory,
       httpResponse.ignore()
     }
   }
-}
-
-object ClickatellSmsGateway {
-  val id = "com.clickatell"
 }
