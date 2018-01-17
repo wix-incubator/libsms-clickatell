@@ -1,26 +1,35 @@
 package com.wix.sms.clickatell.testkit
 
-import com.wix.hoopoe.http.testkit.EmbeddedHttpProbe
+import java.util.concurrent.atomic.AtomicReference
+
+import akka.http.scaladsl.model._
+import com.wix.e2e.http.RequestHandler
+import com.wix.e2e.http.client.extractors.HttpMessageExtractors._
+import com.wix.e2e.http.server.WebServerFactory.aMockWebServerWith
 import com.wix.sms.clickatell.model._
 import com.wix.sms.clickatell.{ClickatellHelper, Credentials}
 import com.wix.sms.model.Sender
-import spray.http._
 
 class ClickatellDriver(port: Int) {
-  private val probe = new EmbeddedHttpProbe(port, EmbeddedHttpProbe.NotFoundHandler)
+  private val delegatingHandler: RequestHandler = { case r: HttpRequest => handler.get().apply(r) }
+  private val notFoundHandler: RequestHandler = { case _: HttpRequest => HttpResponse(status = StatusCodes.NotFound) }
+
+  private val handler = new AtomicReference(notFoundHandler)
+
+  private val probe = aMockWebServerWith(delegatingHandler).onPort(port).build
   private val requestParser = new MessageRequestParser
   private val responseParser = new MessageResponseParser
 
   def startProbe() {
-    probe.doStart()
+    probe.start()
   }
 
   def stopProbe() {
-    probe.doStop()
+    probe.stop()
   }
 
   def resetProbe() {
-    probe.handlers.clear()
+    handler.set(notFoundHandler)
   }
 
   def aMessageFor(credentials: Credentials, sender: Sender, destPhone: String, text: String): MessageCtx = {
@@ -30,6 +39,9 @@ class ClickatellDriver(port: Int) {
       destPhone = destPhone,
       text = text)
   }
+
+  private def prependHandler(handle: RequestHandler) =
+    handler.set(handle orElse handler.get())
 
   class MessageCtx(credentials: Credentials, sender: Sender, destPhone: String, text: String) {
     private val expectedRequest = ClickatellHelper.createMessageRequest(
@@ -80,18 +92,18 @@ class ClickatellDriver(port: Int) {
     }
 
     private def respondWith(httpResponse: HttpResponse): Unit = {
-      probe.handlers += {
+      prependHandler({
         case HttpRequest(
         HttpMethods.POST,
         Uri.Path("/message"),
         headers,
         entity,
         _) if isStubbedRequestEntity(entity) && isStubbedHeaders(headers) => httpResponse
-      }
+      })
     }
 
     private def isStubbedRequestEntity(entity: HttpEntity): Boolean = {
-      val requestJson = entity.asString
+      val requestJson = entity.extractAsString
       val request = requestParser.parse(requestJson)
 
       request == expectedRequest
@@ -105,7 +117,7 @@ class ClickatellDriver(port: Int) {
       val expectedAuthorizationValue = s"Bearer ${credentials.accessToken}"
 
       headers.exists { header =>
-        header.name.equalsIgnoreCase(HttpHeaders.Authorization.name) && header.value == expectedAuthorizationValue
+        header.name.equalsIgnoreCase("Authorization") && header.value == expectedAuthorizationValue
       }
     }
 
